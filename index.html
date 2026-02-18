@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>画像解説ジェネレーター</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+        }
+
+        .canvas-container {
+            aspect-ratio: 16/9;
+            background-color: #0f0f1a; /* 深境螺旋っぽい暗い背景 */
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            background-image: radial-gradient(circle at 50% 50%, #1a1a2e 0%, #0f0f1a 100%);
+        }
+
+        /* カスタムスクロールバー */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a4a6a; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6a6a8a; 
+        }
+
+        .speech-bubble {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 1rem;
+            color: #333;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            max-width: 30%;
+            z-index: 20;
+            display: none; /* 初期状態は非表示、JSで制御 */
+        }
+
+        /* デフォルトのしっぽ (右側) */
+        .speech-bubble::after {
+            content: '';
+            position: absolute;
+            right: -10px;
+            top: 50%;
+            transform: translateY(-50%);
+            border-width: 10px;
+            border-style: solid;
+            border-color: transparent transparent transparent rgba(255, 255, 255, 0.95);
+        }
+
+        /* しっぽ：左 */
+        .speech-bubble.tail-left::after {
+            right: auto;
+            left: -20px;
+            border-color: transparent rgba(255, 255, 255, 0.95) transparent transparent;
+        }
+
+        /* しっぽ：上 */
+        .speech-bubble.tail-top::after {
+            right: 50%;
+            top: -20px;
+            left: auto;
+            transform: translateX(50%) translateY(0);
+            border-color: transparent transparent rgba(255, 255, 255, 0.95) transparent;
+        }
+
+        /* しっぽ：下 */
+        .speech-bubble.tail-bottom::after {
+            right: 50%;
+            bottom: -20px;
+            top: auto;
+            left: auto;
+            transform: translateX(50%) translateY(0);
+            border-color: rgba(255, 255, 255, 0.95) transparent transparent transparent;
+        }
+        
+        /* ドラッグ可能な要素のスタイル */
+        .draggable {
+            cursor: grab;
+        }
+        .draggable:active {
+            cursor: grabbing;
+        }
+
+        .upload-area {
+            border: 2px dashed #4a4a6a;
+            transition: all 0.3s ease;
+        }
+        .upload-area:hover {
+            border-color: #6a6a8a;
+            background-color: rgba(255,255,255,0.05);
+        }
+
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-8 px-4">
+
+    <!-- Header -->
+    <header class="w-full max-w-6xl mb-8 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-white mb-2">
+                <i class="fas fa-layer-group text-blue-400 mr-2"></i>画像解説ジェネレーター
+            </h1>
+            <p class="text-gray-400">画像をアップロードして、解説風の画像を作成しましょう。</p>
+        </div>
+        <button onclick="downloadImage()" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold transition flex items-center shadow-lg">
+            <i class="fas fa-download mr-2"></i> 画像を保存
+        </button>
+    </header>
+
+    <!-- Main Editor Area -->
+    <main class="w-full max-w-6xl flex flex-col lg:flex-row gap-8">
+        
+        <!-- Left Column: Controls -->
+        <div class="w-full lg:w-1/3 space-y-6">
+            
+            <!-- Image A Upload -->
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <h3 class="font-bold text-lg mb-3 flex items-center">
+                    <span class="bg-blue-500 text-xs px-2 py-1 rounded mr-2">左側</span>
+                    解説される画像 (戦績など)
+                </h3>
+                <label class="upload-area flex flex-col items-center justify-center w-full h-32 rounded-lg cursor-pointer">
+                    <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                        <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
+                        <p class="text-sm text-gray-400">クリックしてアップロード</p>
+                    </div>
+                    <input type="file" id="inputImageA" class="hidden" accept="image/*" />
+                </label>
+                <!-- Controls for Image A -->
+                <div class="mt-4 grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-xs text-gray-400 block mb-1">サイズ</label>
+                        <input type="range" id="scaleA" min="50" max="150" value="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-400 block mb-1">回転</label>
+                        <input type="range" id="rotateA" min="-10" max="10" value="0" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Image B Upload -->
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <h3 class="font-bold text-lg mb-3 flex items-center">
+                    <span class="bg-pink-500 text-xs px-2 py-1 rounded mr-2">右側</span>
+                    解説するキャラクター
+                </h3>
+                <label class="upload-area flex flex-col items-center justify-center w-full h-32 rounded-lg cursor-pointer">
+                    <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                        <i class="fas fa-user-plus text-3xl text-gray-400 mb-2"></i>
+                        <p class="text-sm text-gray-400">クリックしてアップロード</p>
+                    </div>
+                    <input type="file" id="inputImageB" class="hidden" accept="image/*" />
+                </label>
+                <!-- Controls for Image B -->
+                <div class="mt-4 grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-xs text-gray-400 block mb-1">サイズ</label>
+                        <input type="range" id="scaleB" min="50" max="150" value="100" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-400 block mb-1">左右反転</label>
+                        <button onclick="flipImageB()" class="w-full bg-gray-700 hover:bg-gray-600 text-xs py-1 rounded transition">反転切り替え</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Text Controls -->
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <h3 class="font-bold text-lg mb-3">
+                    <i class="fas fa-comment-dots text-yellow-400 mr-2"></i>セリフ設定
+                </h3>
+                <textarea id="bubbleText" rows="3" class="w-full bg-gray-700 border-none rounded-lg p-2 text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500" placeholder="ここにセリフを入力...（例：今回の螺旋はここがポイント！）"></textarea>
+                
+                <div class="grid grid-cols-2 gap-2 mt-3">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="showBubble" class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" checked>
+                        <label for="showBubble" class="ml-2 text-sm font-medium text-gray-300">吹き出しを表示</label>
+                    </div>
+                    <select id="tailPosition" class="bg-gray-700 text-white text-sm rounded-lg p-2 border-none cursor-pointer focus:ring-2 focus:ring-blue-500">
+                        <option value="right">しっぽ：右</option>
+                        <option value="left">しっぽ：左</option>
+                        <option value="top">しっぽ：上</option>
+                        <option value="bottom">しっぽ：下</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Canvas Preview -->
+        <div class="w-full lg:w-2/3 flex flex-col">
+            <div class="bg-gray-800 p-2 rounded-t-xl flex justify-between items-center text-xs text-gray-400 px-4">
+                <span>プレビュー (ドラッグで位置調整可能)</span>
+                <span>16:9</span>
+            </div>
+            
+            <!-- This is the capture target -->
+            <div id="captureArea" class="canvas-container w-full rounded-b-xl relative touch-none select-none">
+                
+                <!-- Background Decoration (Optional subtle lines) -->
+                <div class="absolute inset-0 opacity-20 pointer-events-none">
+                    <div class="absolute top-10 left-0 w-full h-[1px] bg-blue-500"></div>
+                    <div class="absolute bottom-10 left-0 w-full h-[1px] bg-blue-500"></div>
+                </div>
+
+                <!-- Content Area Wrapper -->
+                <div class="w-full h-full flex items-center justify-center p-8 relative">
+                    
+                    <!-- Image A (Content) -->
+                    <div id="containerA" class="draggable absolute" style="left: 5%; top: 50%; transform: translateY(-50%); width: 60%; transition: none;">
+                        <img id="imgA" src="" alt="" class="w-full h-auto rounded-lg shadow-2xl border border-gray-600 hidden object-contain" style="max-height: 80vh;">
+                        <div id="placeholderA" class="w-full aspect-video bg-gray-800/50 border-2 border-dashed border-gray-600 rounded-lg flex items-center justify-center text-gray-500">
+                            画像A (戦績)
+                        </div>
+                    </div>
+
+                    <!-- Image B (Character) -->
+                    <div id="containerB" class="draggable absolute" style="right: -5%; bottom: -5%; width: 45%; transition: none;">
+                        <img id="imgB" src="" alt="" class="w-full h-auto drop-shadow-2xl hidden object-contain" style="max-height: 90vh;">
+                        <!-- Character Placeholder -->
+                        <div id="placeholderB" class="hidden"></div> 
+                    </div>
+
+                    <!-- Speech Bubble -->
+                    <!-- Added draggable class and pointer-events-none to text for better dragging -->
+                    <div id="speechBubble" class="speech-bubble draggable" style="right: 35%; top: 20%;">
+                        <p id="bubbleContent" class="text-sm md:text-base whitespace-pre-wrap pointer-events-none">今回の螺旋はここがポイント！</p>
+                    </div>
+
+                </div>
+            </div>
+            
+            <p class="text-xs text-gray-500 mt-2 text-center">※ 画像と吹き出しはドラッグで自由に動かせます。</p>
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        // State
+        const state = {
+            scaleA: 1,
+            rotateA: 0,
+            scaleB: 1,
+            flipB: false,
+            isDragging: false,
+            currentDrag: null,
+            startX: 0,
+            startY: 0,
+            initialLeft: 0,
+            initialTop: 0
+        };
+
+        // Elements
+        const els = {
+            inputA: document.getElementById('inputImageA'),
+            inputB: document.getElementById('inputImageB'),
+            imgA: document.getElementById('imgA'),
+            imgB: document.getElementById('imgB'),
+            placeholderA: document.getElementById('placeholderA'),
+            containerA: document.getElementById('containerA'),
+            containerB: document.getElementById('containerB'),
+            scaleA: document.getElementById('scaleA'),
+            rotateA: document.getElementById('rotateA'),
+            scaleB: document.getElementById('scaleB'),
+            bubbleText: document.getElementById('bubbleText'),
+            showBubble: document.getElementById('showBubble'),
+            tailPosition: document.getElementById('tailPosition'),
+            speechBubble: document.getElementById('speechBubble'),
+            bubbleContent: document.getElementById('bubbleContent'),
+            captureArea: document.getElementById('captureArea')
+        };
+
+        // Initialize Instructions
+        window.onload = () => {
+            // Setup Listeners
+            els.inputA.addEventListener('change', (e) => handleImageUpload(e, els.imgA, els.placeholderA));
+            els.inputB.addEventListener('change', (e) => handleImageUpload(e, els.imgB, null));
+            
+            els.scaleA.addEventListener('input', updateTransforms);
+            els.rotateA.addEventListener('input', updateTransforms);
+            els.scaleB.addEventListener('input', updateTransforms);
+            
+            els.bubbleText.addEventListener('input', (e) => {
+                els.bubbleContent.textContent = e.target.value || '...';
+            });
+            
+            els.showBubble.addEventListener('change', (e) => {
+                els.speechBubble.style.display = e.target.checked ? 'block' : 'none';
+            });
+
+            // Tail Position Listener
+            els.tailPosition.addEventListener('change', (e) => {
+                els.speechBubble.classList.remove('tail-left', 'tail-top', 'tail-bottom');
+                if (e.target.value !== 'right') {
+                    els.speechBubble.classList.add(`tail-${e.target.value}`);
+                }
+            });
+
+            // Draggable Setup
+            setupDraggable(els.containerA);
+            setupDraggable(els.containerB);
+            setupDraggable(els.speechBubble);
+
+            // Default Text
+            els.bubbleContent.textContent = els.bubbleText.placeholder;
+            if(els.showBubble.checked) els.speechBubble.style.display = 'block';
+        };
+
+        function handleImageUpload(event, imgElement, placeholderElement) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imgElement.src = e.target.result;
+                    imgElement.classList.remove('hidden');
+                    if (placeholderElement) placeholderElement.classList.add('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function updateTransforms() {
+            state.scaleA = els.scaleA.value / 100;
+            state.rotateA = els.rotateA.value;
+            state.scaleB = els.scaleB.value / 100;
+
+            els.imgA.style.transform = `scale(${state.scaleA}) rotate(${state.rotateA}deg)`;
+            
+            const flipTransform = state.flipB ? 'scaleX(-1)' : 'scaleX(1)';
+            els.imgB.style.transform = `scale(${state.scaleB}) ${flipTransform}`;
+        }
+
+        function flipImageB() {
+            state.flipB = !state.flipB;
+            updateTransforms();
+        }
+
+        // --- Draggable Logic ---
+        function setupDraggable(element) {
+            element.addEventListener('mousedown', dragStart);
+            element.addEventListener('touchstart', dragStart, {passive: false});
+        }
+
+        function dragStart(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            e.preventDefault();
+            state.isDragging = true;
+            state.currentDrag = e.currentTarget;
+            
+            // Get mouse/touch pos
+            const clientX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+            const clientY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
+            
+            state.startX = clientX;
+            state.startY = clientY;
+            
+            // Get current element pos
+            const rect = state.currentDrag.getBoundingClientRect();
+            const parentRect = els.captureArea.getBoundingClientRect();
+            
+            // Calculate position relative to parent
+            state.initialLeft = state.currentDrag.offsetLeft;
+            state.initialTop = state.currentDrag.offsetTop;
+
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('touchmove', drag, {passive: false});
+            document.addEventListener('mouseup', dragEnd);
+            document.addEventListener('touchend', dragEnd);
+        }
+
+        function drag(e) {
+            if (!state.isDragging || !state.currentDrag) return;
+            e.preventDefault();
+
+            const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+            const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
+
+            const dx = clientX - state.startX;
+            const dy = clientY - state.startY;
+
+            state.currentDrag.style.left = `${state.initialLeft + dx}px`;
+            state.currentDrag.style.top = `${state.initialTop + dy}px`;
+            
+            // Reset right/bottom if they were set, to switch to left/top positioning
+            state.currentDrag.style.right = 'auto';
+            state.currentDrag.style.bottom = 'auto';
+        }
+
+        function dragEnd() {
+            state.isDragging = false;
+            state.currentDrag = null;
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('touchmove', drag);
+            document.removeEventListener('mouseup', dragEnd);
+            document.removeEventListener('touchend', dragEnd);
+        }
+
+        // --- Download Logic ---
+        function downloadImage() {
+            // Ensure fonts are loaded etc.
+            const captureArea = document.getElementById('captureArea');
+            
+            html2canvas(captureArea, {
+                backgroundColor: null, // Keep transparency if any (though we have bg color)
+                scale: 2, // High resolution
+                logging: false,
+                useCORS: true // For images if from external (local blob is fine)
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'genshin_presentation.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }).catch(err => {
+                console.error("Capture failed:", err);
+                alert("画像の保存に失敗しました。ブラウザのセキュリティ設定を確認してください。");
+            });
+        }
+    </script>
+</body>
+</html>
