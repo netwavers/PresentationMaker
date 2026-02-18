@@ -54,10 +54,11 @@
         }
 
         /* デフォルトのしっぽ (右側) */
+        /* 修正: rightを-10pxから-20pxに変更して外側に表示されるように修正 */
         .speech-bubble::after {
             content: '';
             position: absolute;
-            right: -10px;
+            right: -20px;
             top: 50%;
             transform: translateY(-50%);
             border-width: 10px;
@@ -360,7 +361,7 @@
         }
 
         function dragStart(e) {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
             
             e.preventDefault();
             state.isDragging = true;
